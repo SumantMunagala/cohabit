@@ -125,9 +125,9 @@ Update this section at the end of every task and phase. This is the first thing 
 
 ### Current status
 - **Current phase:** Phase 1 — Core simulation in isolation
-- **Current task:** Task 3 — Persona construction function
-- **Last completed task:** Task 2 — LangGraph state (`SimulationState` TypedDict in `backend/graph/state.py`, using `add_messages` reducer on `messages_a`/`messages_b`)
-- **Next task:** Task 4 — Agent A node
+- **Current task:** Task 4 — Agent A node
+- **Last completed task:** Task 3 — Persona construction function (`construct_persona()` in `backend/agents/persona_construction.py`, `ChatAnthropic` + `with_structured_output(PersonaObject, method="json_schema")`)
+- **Next task:** Task 5 — Agent B node
 
 ### Phase completion
 - [ ] Phase 1 — Core simulation in isolation
@@ -140,7 +140,7 @@ Update this section at the end of every task and phase. This is the first thing 
 ### Phase 1 tasks
 - [x] Task 1 — Pydantic models
 - [x] Task 2 — LangGraph state
-- [ ] Task 3 — Persona construction function
+- [x] Task 3 — Persona construction function
 - [ ] Task 4 — Agent A node
 - [ ] Task 5 — Agent B node
 - [ ] Task 6 — Single scenario conversation
@@ -155,11 +155,12 @@ Record any architectural decisions made during the build that weren't in the ori
 
 | Decision | Reason | Tradeoff |
 |----------|--------|----------|
-| | | |
+| `with_structured_output(..., method="json_schema")` instead of the default `method="function_calling"` for Claude structured output | Default tool-calling method let Claude return `dealbreakers`/`behavioral_traits` as a single string instead of a list, failing Pydantic validation, even after adding `Field(description=...)` hints | `json_schema` mode is Anthropic-specific structured-output enforcement; if another provider is ever swapped in, this method choice needs revisiting |
+| `PersonaObject.name` is invented by the LLM rather than passed in | `construct_persona()`'s signature only takes `questionnaire` + `free_text`, no name field, but `PersonaObject.name` is required | Persona names aren't user-supplied — fine for simulation purposes, would need revisiting if personas are ever shown to end users under a real identity |
 
 ### Issues log
 Record bugs or problems encountered and how they were resolved. Useful for interviews — being able to talk about what broke and how you fixed it is as valuable as the working system.
 
 | Issue | Root cause | Resolution |
 |-------|------------|------------|
-| | | |
+| `construct_persona()` raised `pydantic_core.ValidationError` on `dealbreakers`/`behavioral_traits` (`Input should be a valid list`, got a string) | Claude's tool-calling structured-output path doesn't always respect `list[str]` typing in the tool schema — it collapsed multiple items into one combined string. Adding `Field(description=...)` to those fields did not fix it. | Switched `with_structured_output` to `method="json_schema"`, Anthropic's stricter schema-enforced output mode; fixed on first retry |
