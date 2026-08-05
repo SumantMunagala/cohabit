@@ -5,5 +5,4 @@ venv/
 .next/
 node_modules/
 .DS_Store
-CLAUDE.md
-Workflow.md
+
