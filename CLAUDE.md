@@ -125,9 +125,9 @@ Update this section at the end of every task and phase. This is the first thing 
 
 ### Current status
 - **Current phase:** Phase 1 — Core simulation in isolation
-- **Current task:** Task 2 — LangGraph state
-- **Last completed task:** Task 1 — Pydantic models (`QuestionnaireInput`, `PersonaObject`, `ObserverNotes`, `VerdictObject` in `backend/models/`, exported from `backend/models/__init__.py`)
-- **Next task:** Task 3 — Persona construction function
+- **Current task:** Task 3 — Persona construction function
+- **Last completed task:** Task 2 — LangGraph state (`SimulationState` TypedDict in `backend/graph/state.py`, using `add_messages` reducer on `messages_a`/`messages_b`)
+- **Next task:** Task 4 — Agent A node
 
 ### Phase completion
 - [ ] Phase 1 — Core simulation in isolation
@@ -139,7 +139,7 @@ Update this section at the end of every task and phase. This is the first thing 
 
 ### Phase 1 tasks
 - [x] Task 1 — Pydantic models
-- [ ] Task 2 — LangGraph state
+- [x] Task 2 — LangGraph state
 - [ ] Task 3 — Persona construction function
 - [ ] Task 4 — Agent A node
 - [ ] Task 5 — Agent B node
