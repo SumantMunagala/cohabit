@@ -2,7 +2,15 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 from langchain_core.messages import HumanMessage
 from sqlalchemy import func, select, update
 
@@ -98,3 +106,56 @@ async def get_match(job_id: uuid.UUID) -> dict | VerdictObject:
             raise HTTPException(status_code=404, detail="Verdict not found")
 
         return VerdictObject.model_validate(verdict, from_attributes=True)
+
+
+@router.websocket("/match/{job_id}/stream")
+async def stream_match(websocket: WebSocket, job_id: uuid.UUID) -> None:
+    async with async_session_factory() as session:
+        simulation = await session.get(Simulation, job_id)
+    if simulation is None:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+
+    await websocket.accept()
+
+    last_sent = -1
+    try:
+        while True:
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(Transcript)
+                    .where(Transcript.simulation_id == job_id, Transcript.scenario_index > last_sent)
+                    .order_by(Transcript.scenario_index)
+                )
+                for transcript in result.scalars():
+                    await websocket.send_json(
+                        {
+                            "type": "scenario_complete",
+                            "scenario": transcript.scenario_index,
+                            "observer_notes": transcript.content,
+                        }
+                    )
+                    last_sent = transcript.scenario_index
+
+                simulation = await session.get(Simulation, job_id)
+
+            if simulation.status == "completed":
+                async with async_session_factory() as session:
+                    result = await session.execute(select(Verdict).where(Verdict.simulation_id == job_id))
+                    verdict = result.scalar_one_or_none()
+                await websocket.send_json(
+                    {
+                        "type": "complete",
+                        "verdict": VerdictObject.model_validate(verdict, from_attributes=True).model_dump(),
+                    }
+                )
+                await websocket.close()
+                return
+
+            if simulation.status == "failed":
+                await websocket.send_json({"type": "failed", "job_id": str(job_id)})
+                await websocket.close()
+                return
+
+            await asyncio.sleep(1.5)
+    except WebSocketDisconnect:
+        logger.info("Client disconnected from stream for %s", job_id)
