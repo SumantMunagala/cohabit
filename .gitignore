@@ -5,4 +5,5 @@ venv/
 .next/
 node_modules/
 .DS_Store
+interview-guide.md
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Git is initialized with a remote (`origin`) and history. The project is still pre-logic, though: the backend package skeleton exists (`backend/agents/`, `backend/graph/`, `backend/models/`, `backend/db/`, `backend/api/`, `backend/tests/`), but almost every file in it is an empty stub — the only implemented code is a single health-check endpoint in `backend/api/main.py`. The frontend is an unmodified `create-next-app` scaffold (Next.js 16, React 19, Tailwind 4); `app/page.tsx` is still the default landing page. A Python venv and `requirements.txt` already exist at the repo root. No Alembic config/migrations and no test suite exist yet despite both being referenced below. Do not assume a file has real logic just because it exists — check its contents first. The architecture, stack, and structure described in this file are the intended design to build toward.
+Git is initialized with a remote (`origin`) and history. The project is still pre-logic in most places, though: the backend package skeleton exists (`backend/agents/`, `backend/graph/`, `backend/models/`, `backend/db/`, `backend/api/`, `backend/tests/`), and most files in it are still empty stubs — the implemented code so far is the health-check endpoint plus a `POST /match` endpoint (accepts a `MatchRequest`, returns a `job_id` immediately, no simulation triggered yet) in `backend/api/main.py`/`backend/api/routes.py`, and the `MatchRequest`/`MatchResponse` models in `backend/models/match.py`. The frontend is an unmodified `create-next-app` scaffold (Next.js 16, React 19, Tailwind 4); `app/page.tsx` is still the default landing page. A Python venv and `requirements.txt` already exist at the repo root. No Alembic config/migrations and no test suite exist yet despite both being referenced below. Do not assume a file has real logic just because it exists — check its contents first. The architecture, stack, and structure described in this file are the intended design to build toward.
 
 ## Project overview
 AI-powered roommate compatibility system. Users complete a questionnaire and free-text description. The system constructs a behavioral persona per user, simulates two personas across multi-turn conflict scenarios using LangGraph agents, and produces a structured compatibility verdict scored across 4 dimensions via an LLM-as-judge observer pattern.
@@ -82,7 +82,7 @@ npm run dev
 # database
 docker-compose up -d
 ```
-Currently `backend/api/main.py` only exposes `GET /` (health check) — no other routes are wired up. There's no Alembic config or migrations directory yet (`alembic init` hasn't been run), so skip `alembic upgrade head` until that's set up. There's also no test suite yet — `backend/tests/` only has a `.gitkeep`, and `pytest` isn't in `requirements.txt`.
+Currently `backend/api/main.py` exposes `GET /` (health check) and, via `backend/api/routes.py`'s `APIRouter`, `POST /match` (accepts a `MatchRequest`, returns a `MatchResponse` with a `job_id` immediately — no simulation runs yet, that's a later Phase 4 task). There's no Alembic config or migrations directory yet (`alembic init` hasn't been run), so skip `alembic upgrade head` until that's set up. There's also no test suite yet — `backend/tests/` only has a `.gitkeep`, and `pytest` isn't in `requirements.txt`.
 
 ## Development guidelines
 - Explain reasoning before implementing — architectural decisions should be made before writing code
@@ -95,9 +95,9 @@ Currently `backend/api/main.py` only exposes `GET /` (health check) — no other
 Key metrics to record during development and testing. Update this section as numbers come in — these feed directly into resume bullets and interview talking points.
 
 ### Simulation scale
-- Total simulated user pairs run end-to-end: `2` (Jordan/Riley — Tasks 6, 7, 10; Sam/Casey — Task 11)
-- Total simulation runs (including repeats for consistency testing): `5` (2 single-scenario runs in Task 6, 1 in Task 7, 1 three-scenario run in Task 10, 1 full six-scenario run in Task 11)
-- Total LangSmith traced LLM calls across all runs: `~67` (reconstructed from this session's actual tool calls — see breakdown below; the LangSmith dashboard's own project-level stats are the authoritative source per the measurement note below, this session's build-up is provided as a cross-check)
+- Total simulated user pairs run end-to-end: `2` (Jordan/Riley — Tasks 6, 7, 10, and reused throughout Phase 2/3 verification; Sam/Casey — Task 11). Note: 3 additional personas (Mara, Jamie, Dana) were generated during the Phase 3 persona-construction audit but never run through the simulation graph — they test `construct_persona()` in isolation, not end-to-end pairs.
+- Total simulation runs (including repeats for consistency testing): `9` (2 single-scenario runs in Task 6, 1 in Task 7, 1 three-scenario run in Task 10, 1 full six-scenario run in Task 11, 1 three-scenario rerun for the LangSmith-setup check, 1 three-scenario rerun for the run_name check, 2 single-scenario runs for the Phase 3 agent-consistency controlled test)
+- Total LangSmith traced LLM calls across all runs: `~119` (reconstructed from this session's actual tool calls — see breakdown below; the LangSmith dashboard's own project-level stats are the authoritative source per the measurement note below, this session's build-up is provided as a cross-check)
   - Task 3 (persona construction, incl. the `method="json_schema"` bug fix): 3
   - Task 4 (Agent A): 2
   - Task 5 (Agent B): 1
@@ -106,6 +106,12 @@ Key metrics to record during development and testing. Update this section as num
   - Task 9 (verdict, fixture-based, no live graph run): 1
   - Task 10 (3-scenario full graph): 16
   - Task 11 (6-scenario full graph): 31
+  - Post-Task-11 `name=` field verification: 2
+  - LangSmith-setup verification (3-scenario rerun): 16
+  - `run_name` verification (3-scenario rerun): 16
+  - Phase 3 persona-construction audit (3 cases, before the prompt fix): 3
+  - Phase 3 persona-construction audit (same 3 cases, after the prompt fix): 3
+  - Phase 3 agent-consistency controlled test (2 single-scenario runs): 12
 
 ### Performance
 - p95 verdict delivery time end-to-end (job start → verdict stored): `___s` — not yet instrumented; would need `job_start_time`/`verdict_stored_time` logging as described below, which doesn't exist yet (no persistence layer built — that's Phase 4)
@@ -116,7 +122,9 @@ Key metrics to record during development and testing. Update this section as num
 - Agent self-consistency score (same two personas, same scenario, two runs — verdict similarity): `___%`
 - Dealbreaker detection precision before prompt iteration: `___%`
 - Dealbreaker detection precision after prompt iteration: `___%`
-- Number of prompt iterations to reach final observer prompt: `___`
+- Number of prompt iterations to reach final observer prompt: `0` (audited in Phase 3 against 3 concrete criteria — specific quotes vs. vague commentary — and found already solid from the first version; no changes made)
+- Number of prompt iterations for persona construction: `1` (Phase 3 audit found inference quality degraded to near-restatement on flat/single-note inputs; added an explicit good-vs-bad example plus contradiction-detection guidance; re-verified improvement on the same 3 test cases)
+- Number of prompt iterations for agent system prompts: `1` (Phase 3 added an anti-sycophancy-drift instruction so agents don't cave on dealbreakers just to stay agreeable; verified with a controlled same-pair/same-scenario/twice comparison)
 
 ### How to measure each one
 **Self-consistency score** — pick 20 persona pairs, run each through the same scenario twice, compare the verdicts side by side. Score as matching if the dominant compatibility outcome and flagged dealbreakers align. `(matching runs / total runs) * 100`
@@ -132,15 +140,15 @@ Key metrics to record during development and testing. Update this section as num
 Update this section at the end of every task and phase. This is the first thing a new Claude Code session reads to understand where the project stands — keep it current.
 
 ### Current status
-- **Current phase:** Phase 3 — Prompt iteration
+- **Current phase:** Phase 4 — Backend API
 - **Current task:** none started yet
-- **Last completed task:** Phase 2 Task 2 — Name your runs (added `config={"run_name": ...}` to the `.invoke()` call inside `agent_a_node`, `agent_b_node`, `observer_node`, `verdict_node`; verified live in the LangSmith trace tree — e.g. `agent_a` the graph node contains a nested `agent_a_scenario_3` LLM-call span, confirming both the graph-node name and the `run_name` show up as distinct, correctly nested labels)
-- **Next task:** first task of Phase 3 — Prompt iteration (not yet scoped)
+- **Last completed task:** Phase 4, Task 1 — FastAPI app skeleton. Added `POST /match`: accepts a `MatchRequest` (two `QuestionnaireInput` + two free_text strings, `_a`/`_b` suffixed) and returns a `MatchResponse` containing a `job_id` (`uuid.uuid4()`) immediately — no simulation triggered in this task. New `backend/models/match.py` holds both models, re-exported from `backend/models/__init__.py`; route logic lives in `backend/api/routes.py` (previously an empty stub) as an `APIRouter`, mounted in `backend/api/main.py` via `app.include_router(router)`. Verified live with `uvicorn` + `curl`: `GET /` still returns `{"status":"ok"}` and `POST /match` returns HTTP 200 with a valid `job_id`.
+- **Next task:** Phase 4, Task 2 — Background task (not yet scoped)
 
 ### Phase completion
 - [x] Phase 1 — Core simulation in isolation
 - [x] Phase 2 — Observability
-- [ ] Phase 3 — Prompt iteration
+- [x] Phase 3 — Prompt iteration
 - [ ] Phase 4 — Backend API
 - [ ] Phase 5 — Frontend
 - [ ] Phase 6 — Testing and metrics
@@ -162,6 +170,15 @@ Update this section at the end of every task and phase. This is the first thing 
 - [x] Task 1 — Langsmith setup
 - [x] Task 2 — Name your runs
 
+### Phase 4 tasks
+- [x] Task 1 — FastAPI app skeleton
+- [] Task 2 — Background task
+- [] Task 3 — PostgreSQL setup
+- [] Task 4 — Persist simulation results
+- [] Task 5 — Results endpoint
+- [] Task 6 — Websocket streaming
+
+
 ### Decisions log
 Record any architectural decisions made during the build that weren't in the original design. Format: decision made, why, any tradeoffs accepted.
 
@@ -178,7 +195,7 @@ Record any architectural decisions made during the build that weren't in the ori
 | Split scenario routing into two functions: `should_continue()` (pure, string-returning) and `increment_scenario_node()` (state-mutating) in `backend/graph/edges.py`, instead of one function doing both | Confirmed directly against LangGraph docs that conditional-edge routing functions cannot update state — only nodes (or `Command`-returning nodes) can. The task's own "done when" also required `should_continue()` to return a plain string, which a `Command`-based single-function design couldn't satisfy | Task 10 must remember to run `increment_scenario_node` immediately before the conditional edge that calls `should_continue`, or the scenario counter never advances and the graph loops forever |
 | Corrected a stale claim in this doc's Architecture/Key decisions sections: "observer reads all 6 scenarios together" was never actually true once Task 7 was built to spec (observer runs once per scenario, tagged with `scenario_index`) | Task 9 (verdict node) is what actually reads the full `observer_notes` list across all scenarios — cross-scenario synthesis happens one layer later than the original design doc said | None functionally — the original reasoning (cross-scenario patterns matter) still holds, it's just implemented at the verdict stage; corrected the doc rather than leaving it describing an architecture that was never built |
 | `verdict_node()`'s system prompt explicitly names and counteracts LLM score-clustering (instructs full 1-10 range use, reserves 8-10 for unambiguous evidence, maps each of the 4 dimensions to specific evidence categories) | Spec called out a real, well-documented LLM-as-judge failure mode — scores defaulting to a narrow "safe" band regardless of actual variance | Verified against 3 fixture scenarios (smooth / mixed / unresolved-dealbreaker) rather than a live 6-scenario run, to avoid pre-empting Task 11's end-to-end test with ~50+ premature LLM calls |
-| Task 10's outer scenario loop (agent_a → agent_b → observer → verdict) runs as **one continuous graph execution with internal loop-back edges**, under a single `thread_id` — not as separate `.invoke()` calls per scenario sharing a `thread_id` | The task spec's own wording had two constraints in tension ("conditional edge → agent_a again" implies one graph run; "each scenario invocation uses the same thread_id" implies separate calls). The literal, detailed graph-topology wording was treated as the stronger signal | If the intent was actually separate per-scenario invocations relying on the checkpointer to bridge state between them, this is a real design fork requiring a rework of Task 10, not a tweak — flagged to the user, unconfirmed as of this writing |
+| Task 10's outer scenario loop (agent_a → agent_b → observer → verdict) runs as **one continuous graph execution with internal loop-back edges**, under a single `thread_id` — not as separate `.invoke()` calls per scenario sharing a `thread_id` | The task spec's own wording had two constraints in tension ("conditional edge → agent_a again" implies one graph run; "each scenario invocation uses the same thread_id" implies separate calls). The literal, detailed graph-topology wording was treated as the stronger signal | **Confirmed with the user** (post-Phase-3 audit) that this is the intended design — the checkpointer's role here is mostly future-proofing (resumability) rather than load-bearing for a single continuous run. No rework needed |
 | Added `_start_next_scenario_node` and a `SCENARIO_PROMPTS` list (6 conflict topics) in `simulation.py`, not in the original Task 10 spec | Looping back to `agent_a` with no glue node would leave `turn_count` at its prior value (breaking the inner 4-turn loop after scenario 1) and never introduce a new conflict topic | None — necessary for the outer loop to function at all once more than one scenario runs |
 | Renamed `_should_continue` (Task 6, the inner 4-turn-loop check) to `_should_continue_turn` | Task 10 also imports Task 8's `should_continue` (the outer scenario-loop check) into the same file — two identically-named, differently-scoped functions in one module was a real readability hazard | None — internal rename only, not part of any task's "done when" |
 | Demo in `simulation.py`'s `__main__` seeds `current_scenario=3` instead of `0` to get a 3-scenario run | Running the full 6 scenarios for this task's own verification would mean ~40+ live LLM calls, duplicating Task 11's explicit job. Reusing `edges.py`'s unmodified `TOTAL_SCENARIOS=6` by starting partway through avoids touching that already-verified file | None — `current_scenario` is just a progress counter, starting it at 3 is functionally identical to starting at 0 with a lower ceiling |
