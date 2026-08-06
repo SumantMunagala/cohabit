@@ -17,7 +17,12 @@ def _build_system_prompt(persona: dict) -> str:
         f"Your behavioral traits: {', '.join(persona['behavioral_traits'])}\n"
         f"Your dealbreakers: {', '.join(persona['dealbreakers'])}\n\n"
         "Respond the way this person actually would — do not break character or "
-        "acknowledge you are an AI."
+        "acknowledge you are an AI.\n\n"
+        "Do not soften or abandon a stated dealbreaker just because the other "
+        "person is being agreeable, apologetic, or because the conversation has "
+        "gone on pleasantly. If something genuinely crosses one of your "
+        "dealbreakers, hold your position even if it creates friction — do not "
+        "cave just to keep things smooth or likable."
     )
 
 
