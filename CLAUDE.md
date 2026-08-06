@@ -125,9 +125,9 @@ Update this section at the end of every task and phase. This is the first thing 
 
 ### Current status
 - **Current phase:** Phase 1 — Core simulation in isolation
-- **Current task:** Task 7 — Observer node
-- **Last completed task:** Task 6 — Single scenario conversation (`backend/graph/simulation.py`, `StateGraph` with relay nodes bridging `messages_a`/`messages_b`, `MemorySaver` checkpointer, stops after 4 turns via new `turn_count` field)
-- **Next task:** Task 8 — Scenario routing
+- **Current task:** Task 8 — Scenario routing
+- **Last completed task:** Task 7 — Observer node (`observer_node()` in `backend/agents/observer.py`, `with_structured_output(ObserverNotes, method="json_schema")`, manual append to `observer_notes` since that field has no reducer, `scenario_index` force-set from state rather than trusted from the model)
+- **Next task:** Task 9 — Verdict node
 
 ### Phase completion
 - [ ] Phase 1 — Core simulation in isolation
@@ -144,7 +144,7 @@ Update this section at the end of every task and phase. This is the first thing 
 - [x] Task 4 — Agent A node
 - [x] Task 5 — Agent B node
 - [x] Task 6 — Single scenario conversation
-- [ ] Task 7 — Observer node
+- [x] Task 7 — Observer node
 - [ ] Task 8 — Scenario routing
 - [ ] Task 9 — Verdict node
 - [ ] Task 10 — Full graph assembly with checkpointer
@@ -160,6 +160,9 @@ Record any architectural decisions made during the build that weren't in the ori
 | Keep Claude's extended thinking enabled on agent nodes (`agent_a.py` and `agent_b.py`), instead of disabling it | Extended thinking's visible reasoning is wanted later for a frontend dashboard view and for inspecting reasoning quality in LangSmith traces | `AIMessage.content` from `ChatAnthropic` is a list of content blocks (`{"type": "thinking", ...}` + `{"type": "text", ...}`), not a plain string. A text-extraction helper (`_extract_text()`) was needed sooner than predicted — added in `backend/graph/simulation.py` at Task 6, not Task 5/7 as originally guessed, since the relay nodes between the two agents needed plain text before either Agent B or the observer did |
 | Added two "relay" nodes (`_relay_a_to_b`, `_relay_b_to_a`) in `backend/graph/simulation.py` between `agent_a_node`/`agent_b_node` in the graph | `agent_a_node`/`agent_b_node` are constrained to only read/write their own `messages_a`/`messages_b` (a hard constraint from Tasks 4-5), so with no glue node between them, Agent B would never see what Agent A said and vice versa — two disconnected monologues instead of a conversation. Routing/conditional-edge functions can't mutate state, so this had to be a node, not edge logic | Two extra hops per turn in the graph; each relay also owns advancing `turn_count`, so turn-counting logic lives outside both agent nodes |
 | Added `turn_count: int` to `SimulationState` (`backend/graph/state.py`) | Task 6 needed "stop after N turns" logic; the alternative (deriving turn count from `len(messages_a) + len(messages_b)`) was rejected as fragile — it would silently break if the seeding/relay logic changes and double-counts each turn (one `AIMessage` + one relayed `HumanMessage` per turn) | Reopened an already-completed file (`state.py`) for a field not in the original Task 2 design — same category of change as the `PersonaObject.name`/`Field(description=...)` situation in Task 3 |
+| `observer_node()` manually appends to `observer_notes` (`existing + [new_note]`) instead of adding an `operator.add` reducer to `state.py` | `observer_notes` has exactly one writer, unlike `messages_a`/`messages_b` which needed `add_messages`'s ID-based merge logic; a plain reducer would be no more correct than the node managing the full list itself | `state.py` left untouched this task — but this means observer-related state now uses a different accumulation mechanism than the message fields, worth knowing before adding more list-accumulating state fields |
+| Applied `with_structured_output(..., method="json_schema")` to `ObserverNotes` from the start, before hitting any failure | `ObserverNotes` has four `list[str]` fields — the exact shape that broke `PersonaObject` under the default `function_calling` method in Task 3 | None — this is the established fix from Task 3, applied proactively rather than rediscovered |
+| `ObserverNotes.scenario_index` is force-set via `.model_copy(update={"scenario_index": ...})` after the LLM call, not trusted from the model's structured output | The model has no reliable way to know the true `current_scenario` value, and Task 3 already established the model can't be trusted to reproduce structured fields correctly | None — deterministic override, no downside found |
 
 ### Issues log
 Record bugs or problems encountered and how they were resolved. Useful for interviews — being able to talk about what broke and how you fixed it is as valuable as the working system.
