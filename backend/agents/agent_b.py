@@ -25,4 +25,5 @@ def agent_b_node(state: SimulationState) -> dict:
     system_prompt = _build_system_prompt(state["persona_b"])
     messages = [SystemMessage(content=system_prompt), *state["messages_b"]]
     response = _model.invoke(messages)
+    response = response.model_copy(update={"name": state["persona_b"]["name"]})
     return {"messages_b": [response]}

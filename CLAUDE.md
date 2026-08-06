@@ -29,7 +29,7 @@ Observer agent (silent, structured notes per scenario)
 Verdict layer (4-dimension score + plain-English summary)
 ```
 
-Two separate LangGraph agents play Agent A and Agent B (not one agent role-playing both) — a single agent converges toward agreement, so separate agents with separate system prompts are used to produce authentic disagreement. Cross-scenario memory is carried via a LangGraph checkpointer keyed on `thread_id`, and the observer reads all 6 scenarios together (not per-scenario) since cross-scenario patterns are meaningful signal a per-scenario score would miss.
+Two separate LangGraph agents play Agent A and Agent B (not one agent role-playing both) — a single agent converges toward agreement, so separate agents with separate system prompts are used to produce authentic disagreement. Cross-scenario memory is carried via a LangGraph checkpointer keyed on `thread_id`. **As actually built (corrected from an earlier version of this doc):** the observer runs once per scenario (`observer_node`, Task 7), tagging each note with `scenario_index` and appending to a list — it does not see other scenarios. Cross-scenario synthesis happens one layer later, in the verdict node (Task 9), which reads the full accumulated `observer_notes` list across all scenarios. The original design's reasoning ("cross-scenario patterns are meaningful signal a per-scenario score would miss") still holds — it's just implemented at the verdict stage, not the observer stage.
 
 ## Project structure (planned)
 ```
@@ -51,7 +51,7 @@ roomie-match-ai/
 ## Key decisions
 - **LangGraph over a loop** — StateGraph gives typed state management, checkpointing for cross-scenario memory, and conditional routing
 - **Two separate agents** — single agent playing both roles converges; separate agents with separate system prompts produce authentic disagreement
-- **Observer reads all scenarios** — cross-scenario patterns are meaningful signal a per-scenario score would miss
+- **Verdict node reads all scenarios together** (not the observer, which runs per-scenario — see Architecture note above) — cross-scenario patterns are meaningful signal a per-scenario score would miss
 - **Pydantic at every boundary** — catches malformed LLM output immediately rather than letting bad data propagate
 - **Async background tasks** — simulations run 30-90 seconds; synchronous endpoint would time out and block
 - **PostgreSQL for transcripts** — enables self-consistency measurement and dealbreaker detection evals after the fact
@@ -95,14 +95,22 @@ Currently `backend/api/main.py` only exposes `GET /` (health check) — no other
 Key metrics to record during development and testing. Update this section as numbers come in — these feed directly into resume bullets and interview talking points.
 
 ### Simulation scale
-- Total simulated user pairs run end-to-end: `___`
-- Total simulation runs (including repeats for consistency testing): `___`
-- Total LangSmith traced LLM calls across all runs: `___`
+- Total simulated user pairs run end-to-end: `2` (Jordan/Riley — Tasks 6, 7, 10; Sam/Casey — Task 11)
+- Total simulation runs (including repeats for consistency testing): `5` (2 single-scenario runs in Task 6, 1 in Task 7, 1 three-scenario run in Task 10, 1 full six-scenario run in Task 11)
+- Total LangSmith traced LLM calls across all runs: `~67` (reconstructed from this session's actual tool calls — see breakdown below; the LangSmith dashboard's own project-level stats are the authoritative source per the measurement note below, this session's build-up is provided as a cross-check)
+  - Task 3 (persona construction, incl. the `method="json_schema"` bug fix): 3
+  - Task 4 (Agent A): 2
+  - Task 5 (Agent B): 1
+  - Task 6 (single-scenario demo, run twice): 8
+  - Task 7 (observer, chained off a fresh graph run): 5
+  - Task 9 (verdict, fixture-based, no live graph run): 1
+  - Task 10 (3-scenario full graph): 16
+  - Task 11 (6-scenario full graph): 31
 
 ### Performance
-- p95 verdict delivery time end-to-end (job start → verdict stored): `___s`
-- Average simulation duration across all runs: `___s`
-- Max concurrent simulations handled without degradation: `___`
+- p95 verdict delivery time end-to-end (job start → verdict stored): `___s` — not yet instrumented; would need `job_start_time`/`verdict_stored_time` logging as described below, which doesn't exist yet (no persistence layer built — that's Phase 4)
+- Average simulation duration across all runs: `___s` — not precisely timed; Task 10/11's runs were observed to take multiple minutes each but weren't stopwatched. LangSmith's per-trace latency (e.g. the 191.54s P50/P99 seen for one turn in Task 11's trace) is per-LLM-call, not per full simulation — the dashboard's thread-level view would have the real end-to-end duration if needed
+- Max concurrent simulations handled without degradation: `___` — not tested; every run so far has been sequential, one at a time
 
 ### Quality
 - Agent self-consistency score (same two personas, same scenario, two runs — verdict similarity): `___%`
@@ -124,13 +132,13 @@ Key metrics to record during development and testing. Update this section as num
 Update this section at the end of every task and phase. This is the first thing a new Claude Code session reads to understand where the project stands — keep it current.
 
 ### Current status
-- **Current phase:** Phase 1 — Core simulation in isolation
-- **Current task:** Task 8 — Scenario routing
-- **Last completed task:** Task 7 — Observer node (`observer_node()` in `backend/agents/observer.py`, `with_structured_output(ObserverNotes, method="json_schema")`, manual append to `observer_notes` since that field has no reducer, `scenario_index` force-set from state rather than trusted from the model)
-- **Next task:** Task 9 — Verdict node
+- **Current phase:** Phase 2 — Observability
+- **Current task:** none started yet
+- **Last completed task:** Task 11 — End-to-end test with two distinct personas (`backend/tests/test_simulation.py`, the project's first real test file — full live 6-scenario run with deliberately incompatible personas Sam/Casey, `dealbreaker_score` correctly landed at 2/10 with the verdict explicitly naming the noise/sleep-schedule conflict as the root cause across every scenario)
+- **Next task:** first task of Phase 2 — Observability (not yet scoped)
 
 ### Phase completion
-- [ ] Phase 1 — Core simulation in isolation
+- [x] Phase 1 — Core simulation in isolation
 - [ ] Phase 2 — Observability
 - [ ] Phase 3 — Prompt iteration
 - [ ] Phase 4 — Backend API
@@ -145,10 +153,14 @@ Update this section at the end of every task and phase. This is the first thing 
 - [x] Task 5 — Agent B node
 - [x] Task 6 — Single scenario conversation
 - [x] Task 7 — Observer node
-- [ ] Task 8 — Scenario routing
-- [ ] Task 9 — Verdict node
-- [ ] Task 10 — Full graph assembly with checkpointer
-- [ ] Task 11 — End-to-end test with two distinct personas
+- [x] Task 8 — Scenario routing
+- [x] Task 9 — Verdict node
+- [x] Task 10 — Full graph assembly with checkpointer
+- [x] Task 11 — End-to-end test with two distinct personas
+
+### Phase 2 tasks
+- [] Task 1 — Langsmith setup
+- [] Task 2 — Name your runs
 
 ### Decisions log
 Record any architectural decisions made during the build that weren't in the original design. Format: decision made, why, any tradeoffs accepted.
@@ -163,6 +175,15 @@ Record any architectural decisions made during the build that weren't in the ori
 | `observer_node()` manually appends to `observer_notes` (`existing + [new_note]`) instead of adding an `operator.add` reducer to `state.py` | `observer_notes` has exactly one writer, unlike `messages_a`/`messages_b` which needed `add_messages`'s ID-based merge logic; a plain reducer would be no more correct than the node managing the full list itself | `state.py` left untouched this task — but this means observer-related state now uses a different accumulation mechanism than the message fields, worth knowing before adding more list-accumulating state fields |
 | Applied `with_structured_output(..., method="json_schema")` to `ObserverNotes` from the start, before hitting any failure | `ObserverNotes` has four `list[str]` fields — the exact shape that broke `PersonaObject` under the default `function_calling` method in Task 3 | None — this is the established fix from Task 3, applied proactively rather than rediscovered |
 | `ObserverNotes.scenario_index` is force-set via `.model_copy(update={"scenario_index": ...})` after the LLM call, not trusted from the model's structured output | The model has no reliable way to know the true `current_scenario` value, and Task 3 already established the model can't be trusted to reproduce structured fields correctly | None — deterministic override, no downside found |
+| Split scenario routing into two functions: `should_continue()` (pure, string-returning) and `increment_scenario_node()` (state-mutating) in `backend/graph/edges.py`, instead of one function doing both | Confirmed directly against LangGraph docs that conditional-edge routing functions cannot update state — only nodes (or `Command`-returning nodes) can. The task's own "done when" also required `should_continue()` to return a plain string, which a `Command`-based single-function design couldn't satisfy | Task 10 must remember to run `increment_scenario_node` immediately before the conditional edge that calls `should_continue`, or the scenario counter never advances and the graph loops forever |
+| Corrected a stale claim in this doc's Architecture/Key decisions sections: "observer reads all 6 scenarios together" was never actually true once Task 7 was built to spec (observer runs once per scenario, tagged with `scenario_index`) | Task 9 (verdict node) is what actually reads the full `observer_notes` list across all scenarios — cross-scenario synthesis happens one layer later than the original design doc said | None functionally — the original reasoning (cross-scenario patterns matter) still holds, it's just implemented at the verdict stage; corrected the doc rather than leaving it describing an architecture that was never built |
+| `verdict_node()`'s system prompt explicitly names and counteracts LLM score-clustering (instructs full 1-10 range use, reserves 8-10 for unambiguous evidence, maps each of the 4 dimensions to specific evidence categories) | Spec called out a real, well-documented LLM-as-judge failure mode — scores defaulting to a narrow "safe" band regardless of actual variance | Verified against 3 fixture scenarios (smooth / mixed / unresolved-dealbreaker) rather than a live 6-scenario run, to avoid pre-empting Task 11's end-to-end test with ~50+ premature LLM calls |
+| Task 10's outer scenario loop (agent_a → agent_b → observer → verdict) runs as **one continuous graph execution with internal loop-back edges**, under a single `thread_id` — not as separate `.invoke()` calls per scenario sharing a `thread_id` | The task spec's own wording had two constraints in tension ("conditional edge → agent_a again" implies one graph run; "each scenario invocation uses the same thread_id" implies separate calls). The literal, detailed graph-topology wording was treated as the stronger signal | If the intent was actually separate per-scenario invocations relying on the checkpointer to bridge state between them, this is a real design fork requiring a rework of Task 10, not a tweak — flagged to the user, unconfirmed as of this writing |
+| Added `_start_next_scenario_node` and a `SCENARIO_PROMPTS` list (6 conflict topics) in `simulation.py`, not in the original Task 10 spec | Looping back to `agent_a` with no glue node would leave `turn_count` at its prior value (breaking the inner 4-turn loop after scenario 1) and never introduce a new conflict topic | None — necessary for the outer loop to function at all once more than one scenario runs |
+| Renamed `_should_continue` (Task 6, the inner 4-turn-loop check) to `_should_continue_turn` | Task 10 also imports Task 8's `should_continue` (the outer scenario-loop check) into the same file — two identically-named, differently-scoped functions in one module was a real readability hazard | None — internal rename only, not part of any task's "done when" |
+| Demo in `simulation.py`'s `__main__` seeds `current_scenario=3` instead of `0` to get a 3-scenario run | Running the full 6 scenarios for this task's own verification would mean ~40+ live LLM calls, duplicating Task 11's explicit job. Reusing `edges.py`'s unmodified `TOTAL_SCENARIOS=6` by starting partway through avoids touching that already-verified file | None — `current_scenario` is just a progress counter, starting it at 3 is functionally identical to starting at 0 with a lower ceiling |
+| Progress printed via `graph.stream(..., stream_mode="values")` in the driver code instead of a print-only node baked into the graph | `Workflow.md`'s own guidance treats debug prints as development-time, not committed graph structure | None found |
+| Set `name` on messages in `agent_a_node`/`agent_b_node` (own `AIMessage` reply) and the relay nodes (relayed `HumanMessage`) in `simulation.py` | Post-Task-11, LangSmith traces only showed generic `human`/`ai` role labels instead of persona names, making traces harder to read. Confirmed via docs that LangChain messages support a `name` field for exactly this, with a provider-dependent-behavior caveat | Verified live against Anthropic specifically (not assumed from docs) — the field is accepted without error and round-trips correctly through a full relay → next-agent call; `observer_node`/`verdict_node` messages are unaffected since those aren't persona-voiced turns |
 
 ### Issues log
 Record bugs or problems encountered and how they were resolved. Useful for interviews — being able to talk about what broke and how you fixed it is as valuable as the working system.
