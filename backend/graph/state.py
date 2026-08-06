@@ -11,3 +11,4 @@ class SimulationState(TypedDict):
     current_scenario: int
     observer_notes: list[dict]
     verdict: dict | None
+    turn_count: int

@@ -125,9 +125,9 @@ Update this section at the end of every task and phase. This is the first thing 
 
 ### Current status
 - **Current phase:** Phase 1 — Core simulation in isolation
-- **Current task:** Task 6 — Single scenario conversation
-- **Last completed task:** Task 5 — Agent B node (`agent_b_node()` in `backend/agents/agent_b.py`, exact structural mirror of `agent_a_node()` reading `persona_b`/`messages_b`)
-- **Next task:** Task 7 — Observer node
+- **Current task:** Task 7 — Observer node
+- **Last completed task:** Task 6 — Single scenario conversation (`backend/graph/simulation.py`, `StateGraph` with relay nodes bridging `messages_a`/`messages_b`, `MemorySaver` checkpointer, stops after 4 turns via new `turn_count` field)
+- **Next task:** Task 8 — Scenario routing
 
 ### Phase completion
 - [ ] Phase 1 — Core simulation in isolation
@@ -143,7 +143,7 @@ Update this section at the end of every task and phase. This is the first thing 
 - [x] Task 3 — Persona construction function
 - [x] Task 4 — Agent A node
 - [x] Task 5 — Agent B node
-- [ ] Task 6 — Single scenario conversation
+- [x] Task 6 — Single scenario conversation
 - [ ] Task 7 — Observer node
 - [ ] Task 8 — Scenario routing
 - [ ] Task 9 — Verdict node
@@ -157,7 +157,9 @@ Record any architectural decisions made during the build that weren't in the ori
 |----------|--------|----------|
 | `with_structured_output(..., method="json_schema")` instead of the default `method="function_calling"` for Claude structured output | Default tool-calling method let Claude return `dealbreakers`/`behavioral_traits` as a single string instead of a list, failing Pydantic validation, even after adding `Field(description=...)` hints | `json_schema` mode is Anthropic-specific structured-output enforcement; if another provider is ever swapped in, this method choice needs revisiting |
 | `PersonaObject.name` is invented by the LLM rather than passed in | `construct_persona()`'s signature only takes `questionnaire` + `free_text`, no name field, but `PersonaObject.name` is required | Persona names aren't user-supplied — fine for simulation purposes, would need revisiting if personas are ever shown to end users under a real identity |
-| Keep Claude's extended thinking enabled on agent nodes (`agent_a.py` and future `agent_b.py`), instead of disabling it | Extended thinking's visible reasoning is wanted later for a frontend dashboard view and for inspecting reasoning quality in LangSmith traces | `AIMessage.content` from `ChatAnthropic` is a list of content blocks (`{"type": "thinking", ...}` + `{"type": "text", ...}`), not a plain string. Any node/UI that needs plain reply text (Agent B reading Agent A's history, the observer reading transcripts, a future frontend transcript view) needs a small "extract the text block" helper rather than reading `.content` directly — not yet written, to be added when Task 5 (Agent B) or Task 7 (observer) first needs to consume message text |
+| Keep Claude's extended thinking enabled on agent nodes (`agent_a.py` and `agent_b.py`), instead of disabling it | Extended thinking's visible reasoning is wanted later for a frontend dashboard view and for inspecting reasoning quality in LangSmith traces | `AIMessage.content` from `ChatAnthropic` is a list of content blocks (`{"type": "thinking", ...}` + `{"type": "text", ...}`), not a plain string. A text-extraction helper (`_extract_text()`) was needed sooner than predicted — added in `backend/graph/simulation.py` at Task 6, not Task 5/7 as originally guessed, since the relay nodes between the two agents needed plain text before either Agent B or the observer did |
+| Added two "relay" nodes (`_relay_a_to_b`, `_relay_b_to_a`) in `backend/graph/simulation.py` between `agent_a_node`/`agent_b_node` in the graph | `agent_a_node`/`agent_b_node` are constrained to only read/write their own `messages_a`/`messages_b` (a hard constraint from Tasks 4-5), so with no glue node between them, Agent B would never see what Agent A said and vice versa — two disconnected monologues instead of a conversation. Routing/conditional-edge functions can't mutate state, so this had to be a node, not edge logic | Two extra hops per turn in the graph; each relay also owns advancing `turn_count`, so turn-counting logic lives outside both agent nodes |
+| Added `turn_count: int` to `SimulationState` (`backend/graph/state.py`) | Task 6 needed "stop after N turns" logic; the alternative (deriving turn count from `len(messages_a) + len(messages_b)`) was rejected as fragile — it would silently break if the seeding/relay logic changes and double-counts each turn (one `AIMessage` + one relayed `HumanMessage` per turn) | Reopened an already-completed file (`state.py`) for a field not in the original Task 2 design — same category of change as the `PersonaObject.name`/`Field(description=...)` situation in Task 3 |
 
 ### Issues log
 Record bugs or problems encountered and how they were resolved. Useful for interviews — being able to talk about what broke and how you fixed it is as valuable as the working system.
