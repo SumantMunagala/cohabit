@@ -49,6 +49,7 @@ def _build_notes_summary(observer_notes: list[dict]) -> str:
 def verdict_node(state: SimulationState) -> dict:
     notes_summary = _build_notes_summary(state["observer_notes"])
     verdict = _structured_model.invoke(
-        [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=notes_summary)]
+        [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=notes_summary)],
+        config={"run_name": "verdict_synthesis"},
     )
     return {"verdict": verdict.model_dump()}

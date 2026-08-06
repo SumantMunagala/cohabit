@@ -62,7 +62,7 @@ OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 LANGCHAIN_API_KEY=
 LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=roomie-match-ai
+LANGCHAIN_PROJECT=cohabit
 DATABASE_URL=
 ```
 Never commit `.env` — only `.env.example` with key names and no values. Add `.env` to `.gitignore` before the first commit.
@@ -132,14 +132,14 @@ Key metrics to record during development and testing. Update this section as num
 Update this section at the end of every task and phase. This is the first thing a new Claude Code session reads to understand where the project stands — keep it current.
 
 ### Current status
-- **Current phase:** Phase 2 — Observability
+- **Current phase:** Phase 3 — Prompt iteration
 - **Current task:** none started yet
-- **Last completed task:** Task 11 — End-to-end test with two distinct personas (`backend/tests/test_simulation.py`, the project's first real test file — full live 6-scenario run with deliberately incompatible personas Sam/Casey, `dealbreaker_score` correctly landed at 2/10 with the verdict explicitly naming the noise/sleep-schedule conflict as the root cause across every scenario)
-- **Next task:** first task of Phase 2 — Observability (not yet scoped)
+- **Last completed task:** Phase 2 Task 2 — Name your runs (added `config={"run_name": ...}` to the `.invoke()` call inside `agent_a_node`, `agent_b_node`, `observer_node`, `verdict_node`; verified live in the LangSmith trace tree — e.g. `agent_a` the graph node contains a nested `agent_a_scenario_3` LLM-call span, confirming both the graph-node name and the `run_name` show up as distinct, correctly nested labels)
+- **Next task:** first task of Phase 3 — Prompt iteration (not yet scoped)
 
 ### Phase completion
 - [x] Phase 1 — Core simulation in isolation
-- [ ] Phase 2 — Observability
+- [x] Phase 2 — Observability
 - [ ] Phase 3 — Prompt iteration
 - [ ] Phase 4 — Backend API
 - [ ] Phase 5 — Frontend
@@ -159,8 +159,8 @@ Update this section at the end of every task and phase. This is the first thing 
 - [x] Task 11 — End-to-end test with two distinct personas
 
 ### Phase 2 tasks
-- [] Task 1 — Langsmith setup
-- [] Task 2 — Name your runs
+- [x] Task 1 — Langsmith setup
+- [x] Task 2 — Name your runs
 
 ### Decisions log
 Record any architectural decisions made during the build that weren't in the original design. Format: decision made, why, any tradeoffs accepted.
@@ -184,6 +184,7 @@ Record any architectural decisions made during the build that weren't in the ori
 | Demo in `simulation.py`'s `__main__` seeds `current_scenario=3` instead of `0` to get a 3-scenario run | Running the full 6 scenarios for this task's own verification would mean ~40+ live LLM calls, duplicating Task 11's explicit job. Reusing `edges.py`'s unmodified `TOTAL_SCENARIOS=6` by starting partway through avoids touching that already-verified file | None — `current_scenario` is just a progress counter, starting it at 3 is functionally identical to starting at 0 with a lower ceiling |
 | Progress printed via `graph.stream(..., stream_mode="values")` in the driver code instead of a print-only node baked into the graph | `Workflow.md`'s own guidance treats debug prints as development-time, not committed graph structure | None found |
 | Set `name` on messages in `agent_a_node`/`agent_b_node` (own `AIMessage` reply) and the relay nodes (relayed `HumanMessage`) in `simulation.py` | Post-Task-11, LangSmith traces only showed generic `human`/`ai` role labels instead of persona names, making traces harder to read. Confirmed via docs that LangChain messages support a `name` field for exactly this, with a provider-dependent-behavior caveat | Verified live against Anthropic specifically (not assumed from docs) — the field is accepted without error and round-trips correctly through a full relay → next-agent call; `observer_node`/`verdict_node` messages are unaffected since those aren't persona-voiced turns |
+| Added `config={"run_name": ...}` to the `.invoke()` call inside each node (`agent_a_scenario_{n}`, `agent_b_scenario_{n}`, `observer_scenario_{n}`, `verdict_synthesis`) — separate and distinct from the message-level `name` field added earlier | "Name your runs" (Phase 2 Task 2) turned out to mean naming the individual LLM-call span, not the message speaker label already handled. The two are genuinely different LangSmith concepts: `run_name` labels a trace span/row; message `name` labels a speaker within message content | Verified live in the trace tree: the graph node name (e.g. `agent_a`, from `add_node`) and the nested `run_name` (`agent_a_scenario_3`) both appear, correctly nested rather than one overwriting the other |
 
 ### Issues log
 Record bugs or problems encountered and how they were resolved. Useful for interviews — being able to talk about what broke and how you fixed it is as valuable as the working system.

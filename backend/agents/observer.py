@@ -58,7 +58,8 @@ def observer_node(state: SimulationState) -> dict:
     human_message = f"{persona_context}\n\nTranscript:\n{transcript}"
 
     notes = _structured_model.invoke(
-        [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=human_message)]
+        [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=human_message)],
+        config={"run_name": f"observer_scenario_{state['current_scenario']}"},
     )
     notes = notes.model_copy(update={"scenario_index": state["current_scenario"]})
 
