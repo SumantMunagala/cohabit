@@ -185,6 +185,13 @@ Update this section at the end of every task and phase. This is the first thing 
 - [x] Task 5 — Results endpoint
 - [x] Task 6 — Websocket streaming
 
+### Phase 5 tasks
+- [] Task 1 — Questionnaire form
+- [] Task 2 — Wire form to backend
+- [] Task 3 — Simulation progress
+- [] Task 4 — Verdict display
+
+
 
 ### Decisions log
 Record any architectural decisions made during the build that weren't in the original design. Format: decision made, why, any tradeoffs accepted.
