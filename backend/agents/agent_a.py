@@ -1,12 +1,12 @@
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
 
+from backend.agents.llm import get_llm
 from backend.graph.state import SimulationState
 
 load_dotenv()
 
-_model = ChatAnthropic(model="claude-sonnet-5")
+_model = get_llm()
 
 
 def _build_system_prompt(persona: dict) -> str:

@@ -1,13 +1,13 @@
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from backend.agents.llm import get_llm
 from backend.models.questionnaire import QuestionnaireInput
 from backend.models.persona import PersonaObject
 
 load_dotenv()
 
-_model = ChatAnthropic(model="claude-sonnet-5")
+_model = get_llm()
 _structured_model = _model.with_structured_output(PersonaObject, method="json_schema")
 
 SYSTEM_PROMPT = (

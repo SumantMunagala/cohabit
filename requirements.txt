@@ -4,6 +4,7 @@ langchain
 langgraph
 langchain-anthropic
 langchain-openai
+langchain-ollama
 pydantic
 sqlalchemy
 asyncpg
