@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface QuestionnaireInput {
   sleep_schedule: string;
@@ -23,8 +23,47 @@ interface MatchResponse {
   job_id: string;
 }
 
+interface ObserverNotes {
+  scenario_index: number;
+  friction_points: string[];
+  dealbreaker_violations: string[];
+  tone_shifts: string[];
+  concessions: string[];
+}
+
+interface ScenarioCompleteMessage {
+  type: "scenario_complete";
+  scenario: number;
+  observer_notes: ObserverNotes;
+}
+
+interface VerdictObject {
+  lifestyle_score: number;
+  communication_score: number;
+  conflict_score: number;
+  dealbreaker_score: number;
+  lifestyle_explanation: string;
+  communication_explanation: string;
+  conflict_explanation: string;
+  dealbreaker_explanation: string;
+  overall_summary: string;
+}
+
+interface CompleteMessage {
+  type: "complete";
+  verdict: VerdictObject;
+}
+
+interface FailedMessage {
+  type: "failed";
+  job_id: string;
+}
+
+type WsMessage = ScenarioCompleteMessage | CompleteMessage | FailedMessage;
+
 const TOTAL_STEPS = 3;
 const API_URL = "http://localhost:8000";
+const WS_URL = "ws://localhost:8000";
 
 const TEST_PERSONA_B: QuestionnaireInput = {
   sleep_schedule: "night_owl",
@@ -53,6 +92,10 @@ export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scenarios, setScenarios] = useState<ScenarioCompleteMessage[]>([]);
+  const [verdict, setVerdict] = useState<VerdictObject | null>(null);
+  const [simulationStatus, setSimulationStatus] = useState<"running" | "complete" | "failed">("running");
+  const [wsError, setWsError] = useState<string | null>(null);
 
   const isStepValid = (): boolean => {
     if (step === 1) return formData.sleep_schedule !== "" && formData.budget !== "";
@@ -100,18 +143,112 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (!jobId) return;
+
+    const ws = new WebSocket(`${WS_URL}/match/${jobId}/stream`);
+
+    ws.onmessage = (event) => {
+      const message: WsMessage = JSON.parse(event.data);
+      if (message.type === "scenario_complete") {
+        setScenarios((prev) => [...prev, message]);
+      } else if (message.type === "complete") {
+        setVerdict(message.verdict);
+        setSimulationStatus("complete");
+        ws.close();
+      } else if (message.type === "failed") {
+        setSimulationStatus("failed");
+        ws.close();
+      }
+    };
+
+    ws.onerror = () => {
+      setWsError("Lost connection to the simulation stream.");
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [jobId]);
+
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 py-16 dark:bg-black">
       <div className="w-full max-w-lg rounded-2xl border border-black/8 bg-white p-8 dark:border-white/[.145] dark:bg-zinc-900">
         {jobId ? (
-          <div className="flex flex-col gap-3">
-            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Simulation started</h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Your match simulation is running. Job ID:
-            </p>
+          <div className="flex flex-col gap-4">
+            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Simulation in progress</h2>
             <p className="rounded-lg bg-zinc-100 px-3 py-2 font-mono text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
               {jobId}
             </p>
+
+            {simulationStatus === "running" && (
+              <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900 dark:border-zinc-600 dark:border-t-zinc-50" />
+                Running simulation...
+              </div>
+            )}
+            {simulationStatus === "complete" && (
+              <p className="text-sm font-medium text-green-600 dark:text-green-400">Simulation complete.</p>
+            )}
+            {simulationStatus === "failed" && (
+              <p className="text-sm font-medium text-red-600 dark:text-red-400">Simulation failed.</p>
+            )}
+            {wsError && <p className="text-sm text-red-600 dark:text-red-400">{wsError}</p>}
+
+            {scenarios.length > 0 && (
+              <ul className="flex flex-col gap-2">
+                {scenarios.map((s) => (
+                  <li
+                    key={s.scenario}
+                    className="flex items-center justify-between rounded-lg bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800"
+                  >
+                    <span className="text-zinc-800 dark:text-zinc-200">Scenario {s.scenario + 1}</span>
+                    <span className="text-xs font-medium text-green-600 dark:text-green-400">Complete</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {simulationStatus === "complete" && verdict && (
+              <div className="flex flex-col gap-5 border-t border-zinc-200 pt-5 dark:border-zinc-700">
+                <div className="rounded-lg bg-zinc-100 px-4 py-3 dark:bg-zinc-800">
+                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{verdict.overall_summary}</p>
+                </div>
+
+                {[
+                  { label: "Lifestyle", score: verdict.lifestyle_score, explanation: verdict.lifestyle_explanation },
+                  {
+                    label: "Communication",
+                    score: verdict.communication_score,
+                    explanation: verdict.communication_explanation,
+                  },
+                  {
+                    label: "Conflict resolution",
+                    score: verdict.conflict_score,
+                    explanation: verdict.conflict_explanation,
+                  },
+                  {
+                    label: "Dealbreakers",
+                    score: verdict.dealbreaker_score,
+                    explanation: verdict.dealbreaker_explanation,
+                  },
+                ].map((dimension) => (
+                  <div key={dimension.label} className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                      <span>{dimension.label}</span>
+                      <span>{dimension.score}/10</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-700">
+                      <div
+                        className="h-1.5 rounded-full bg-zinc-900 dark:bg-zinc-50"
+                        style={{ width: `${dimension.score * 10}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">{dimension.explanation}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <>
