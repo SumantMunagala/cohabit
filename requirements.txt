@@ -11,3 +11,5 @@ asyncpg
 alembic
 langsmith
 python-dotenv
+httpx
+numpy

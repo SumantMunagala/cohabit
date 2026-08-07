@@ -7,7 +7,7 @@ from backend.models.verdict import VerdictObject
 
 load_dotenv()
 
-_model = get_llm()
+_model = get_llm(temperature=0.2)
 _structured_model = _model.with_structured_output(VerdictObject, method="json_schema")
 
 SYSTEM_PROMPT = (
