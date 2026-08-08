@@ -14,11 +14,14 @@ from fastapi import (
 from langchain_core.messages import HumanMessage
 from sqlalchemy import func, select, update
 
+from backend.agents.candidate_selection import find_top_matches
+from backend.agents.embeddings import embed_persona
 from backend.agents.persona_construction import construct_persona
-from backend.db.models import Simulation, Transcript, Verdict
+from backend.db.models import Match, Simulation, Transcript, User, Verdict
 from backend.db.session import async_session_factory
 from backend.graph.simulation import SCENARIO_PROMPTS, graph
-from backend.models.match import MatchRequest, MatchResponse
+from backend.models.match import MatchCandidate, MatchRequest, MatchResponse
+from backend.models.persona import PersonaObject
 from backend.models.verdict import VerdictObject
 
 logger = logging.getLogger(__name__)
@@ -26,15 +29,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _run_simulation_async(job_id: uuid.UUID, request: MatchRequest) -> None:
-    async with async_session_factory() as session:
-        session.add(Simulation(id=job_id, status="running"))
-        await session.commit()
-
+async def _run_pairwise_simulation(job_id: uuid.UUID, persona_a: PersonaObject, persona_b: PersonaObject) -> None:
     try:
-        persona_a = construct_persona(request.questionnaire_a, request.free_text_a)
-        persona_b = construct_persona(request.questionnaire_b, request.free_text_b)
-
         initial_state = {
             "persona_a": persona_a.model_dump(),
             "persona_b": persona_b.model_dump(),
@@ -78,16 +74,68 @@ async def _run_simulation_async(job_id: uuid.UUID, request: MatchRequest) -> Non
             await session.commit()
 
 
-def run_simulation(job_id: uuid.UUID, request: MatchRequest) -> None:
-    logger.info("Simulation %s started", job_id)
-    asyncio.run(_run_simulation_async(job_id, request))
+async def _run_all_matches_async(
+    persona: PersonaObject, candidates: list[dict], job_ids: list[uuid.UUID]
+) -> None:
+    await asyncio.gather(
+        *[
+            _run_pairwise_simulation(job_id, persona, PersonaObject(**candidate["persona"]))
+            for job_id, candidate in zip(job_ids, candidates)
+        ]
+    )
+
+
+def run_matches(persona: PersonaObject, candidates: list[dict], job_ids: list[uuid.UUID]) -> None:
+    logger.info("Running %d parallel simulations", len(job_ids))
+    asyncio.run(_run_all_matches_async(persona, candidates, job_ids))
+
+
+async def _prepare_match(
+    persona: PersonaObject, embedding: list[float], match_request_id: uuid.UUID
+) -> tuple[list[dict], list[uuid.UUID]]:
+    async with async_session_factory() as session:
+        session.add(User(id=uuid.uuid4(), persona=persona.model_dump(), embedding=embedding))
+        await session.commit()
+
+    candidates = await find_top_matches(persona)
+    job_ids = [uuid.uuid4() for _ in candidates]
+
+    async with async_session_factory() as session:
+        for job_id in job_ids:
+            session.add(Simulation(id=job_id, status="running"))
+        await session.commit()
+
+    async with async_session_factory() as session:
+        for job_id, candidate in zip(job_ids, candidates):
+            session.add(
+                Match(
+                    match_request_id=match_request_id,
+                    simulation_id=job_id,
+                    candidate_id=candidate["id"],
+                    similarity=candidate["similarity"],
+                )
+            )
+        await session.commit()
+
+    return candidates, job_ids
 
 
 @router.post("/match", response_model=MatchResponse)
 def create_match(request: MatchRequest, background_tasks: BackgroundTasks) -> MatchResponse:
-    job_id = uuid.uuid4()
-    background_tasks.add_task(run_simulation, job_id, request)
-    return MatchResponse(job_id=job_id)
+    persona = construct_persona(request.questionnaire, request.free_text)
+    embedding = embed_persona(persona)
+    match_request_id = uuid.uuid4()
+
+    candidates, job_ids = asyncio.run(_prepare_match(persona, embedding, match_request_id))
+
+    background_tasks.add_task(run_matches, persona, candidates, job_ids)
+
+    return MatchResponse(
+        matches=[
+            MatchCandidate(job_id=job_id, candidate_id=candidate["id"])
+            for job_id, candidate in zip(job_ids, candidates)
+        ]
+    )
 
 
 @router.get("/match/{job_id}")

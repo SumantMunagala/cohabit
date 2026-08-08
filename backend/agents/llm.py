@@ -13,9 +13,9 @@ API_MODEL = "claude-sonnet-5"
 
 def get_llm(temperature: float | None = None):
     mode = os.environ.get("LLM_MODE", "api")
-    kwargs = {} if temperature is None else {"temperature": temperature}
     if mode == "local":
+        kwargs = {} if temperature is None else {"temperature": temperature}
         return ChatOllama(model=LOCAL_MODEL, base_url=LOCAL_BASE_URL, **kwargs)
     if mode == "api":
-        return ChatAnthropic(model=API_MODEL, **kwargs)
+        return ChatAnthropic(model=API_MODEL)
     raise ValueError(f"Invalid LLM_MODE: {mode!r} (expected 'local' or 'api')")

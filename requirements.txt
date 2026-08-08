@@ -5,10 +5,12 @@ langgraph
 langchain-anthropic
 langchain-openai
 langchain-ollama
+langchain-voyageai
 pydantic
 sqlalchemy
 asyncpg
 alembic
+pgvector
 langsmith
 python-dotenv
 httpx

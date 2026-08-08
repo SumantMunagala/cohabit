@@ -13,14 +13,17 @@ interface QuestionnaireInput {
 }
 
 interface MatchRequest {
-  questionnaire_a: QuestionnaireInput;
-  free_text_a: string;
-  questionnaire_b: QuestionnaireInput;
-  free_text_b: string;
+  questionnaire: QuestionnaireInput;
+  free_text: string;
+}
+
+interface MatchCandidateResponse {
+  job_id: string;
+  candidate_id: string;
 }
 
 interface MatchResponse {
-  job_id: string;
+  matches: MatchCandidateResponse[];
 }
 
 interface ObserverNotes {
@@ -61,21 +64,20 @@ interface FailedMessage {
 
 type WsMessage = ScenarioCompleteMessage | CompleteMessage | FailedMessage;
 
+interface MatchResult {
+  job_id: string;
+  candidate_id: string;
+  status: "running" | "complete" | "failed";
+  verdict?: VerdictObject;
+}
+
 const TOTAL_STEPS = 3;
 const API_URL = "http://localhost:8000";
 const WS_URL = "ws://localhost:8000";
 
-const TEST_PERSONA_B: QuestionnaireInput = {
-  sleep_schedule: "night_owl",
-  cleanliness_level: 4,
-  guests: "often",
-  noise_tolerance: 8,
-  wfh: false,
-  pets: true,
-  budget: "medium",
-};
-const TEST_FREE_TEXT_B =
-  "I'm laid back, love having friends over, and don't stress much about mess.";
+function averageScore(v: VerdictObject): number {
+  return (v.lifestyle_score + v.communication_score + v.conflict_score + v.dealbreaker_score) / 4;
+}
 
 export default function Home() {
   const [step, setStep] = useState(1);
@@ -89,13 +91,10 @@ export default function Home() {
     budget: "",
   });
   const [freeText, setFreeText] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [matches, setMatches] = useState<MatchCandidateResponse[] | null>(null);
+  const [results, setResults] = useState<MatchResult[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [scenarios, setScenarios] = useState<ScenarioCompleteMessage[]>([]);
-  const [verdict, setVerdict] = useState<VerdictObject | null>(null);
-  const [simulationStatus, setSimulationStatus] = useState<"running" | "complete" | "failed">("running");
-  const [wsError, setWsError] = useState<string | null>(null);
 
   const isStepValid = (): boolean => {
     if (step === 1) return formData.sleep_schedule !== "" && formData.budget !== "";
@@ -118,10 +117,8 @@ export default function Home() {
     setError(null);
     try {
       const body: MatchRequest = {
-        questionnaire_a: formData,
-        free_text_a: freeText,
-        questionnaire_b: TEST_PERSONA_B,
-        free_text_b: TEST_FREE_TEXT_B,
+        questionnaire: formData,
+        free_text: freeText,
       };
       const response = await fetch(`${API_URL}/match`, {
         method: "POST",
@@ -135,7 +132,10 @@ export default function Home() {
         );
       }
       const data: MatchResponse = await response.json();
-      setJobId(data.job_id);
+      setMatches(data.matches);
+      setResults(
+        data.matches.map((m) => ({ job_id: m.job_id, candidate_id: m.candidate_id, status: "running" as const }))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -144,111 +144,116 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!matches) return;
 
-    const ws = new WebSocket(`${WS_URL}/match/${jobId}/stream`);
+    const sockets = matches.map((m) => {
+      const ws = new WebSocket(`${WS_URL}/match/${m.job_id}/stream`);
 
-    ws.onmessage = (event) => {
-      const message: WsMessage = JSON.parse(event.data);
-      if (message.type === "scenario_complete") {
-        setScenarios((prev) => [...prev, message]);
-      } else if (message.type === "complete") {
-        setVerdict(message.verdict);
-        setSimulationStatus("complete");
-        ws.close();
-      } else if (message.type === "failed") {
-        setSimulationStatus("failed");
-        ws.close();
-      }
-    };
+      ws.onmessage = (event) => {
+        const message: WsMessage = JSON.parse(event.data);
+        if (message.type === "complete") {
+          setResults((prev) =>
+            prev.map((r) => (r.job_id === m.job_id ? { ...r, status: "complete", verdict: message.verdict } : r))
+          );
+          ws.close();
+        } else if (message.type === "failed") {
+          setResults((prev) => prev.map((r) => (r.job_id === m.job_id ? { ...r, status: "failed" } : r)));
+          ws.close();
+        }
+      };
 
-    ws.onerror = () => {
-      setWsError("Lost connection to the simulation stream.");
-    };
+      ws.onerror = () => {
+        setResults((prev) => prev.map((r) => (r.job_id === m.job_id ? { ...r, status: "failed" } : r)));
+      };
+
+      return ws;
+    });
 
     return () => {
-      ws.close();
+      sockets.forEach((ws) => ws.close());
     };
-  }, [jobId]);
+  }, [matches]);
+
+  const allSettled = results.length > 0 && results.every((r) => r.status !== "running");
+  const displayResults = allSettled
+    ? [...results]
+        .filter((r): r is MatchResult & { verdict: VerdictObject } => r.status === "complete" && !!r.verdict)
+        .sort((a, b) => averageScore(b.verdict) - averageScore(a.verdict))
+    : results;
 
   return (
     <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 py-16 dark:bg-black">
-      <div className="w-full max-w-lg rounded-2xl border border-black/8 bg-white p-8 dark:border-white/[.145] dark:bg-zinc-900">
-        {jobId ? (
-          <div className="flex flex-col gap-4">
-            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Simulation in progress</h2>
-            <p className="rounded-lg bg-zinc-100 px-3 py-2 font-mono text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
-              {jobId}
-            </p>
+      <div
+        className={`w-full rounded-2xl border border-black/8 bg-white p-8 dark:border-white/[.145] dark:bg-zinc-900 ${
+          matches ? "max-w-3xl" : "max-w-lg"
+        }`}
+      >
+        {matches ? (
+          <div className="flex flex-col gap-6">
+            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+              {allSettled ? "Your top matches" : "Finding your matches..."}
+            </h2>
 
-            {simulationStatus === "running" && (
-              <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900 dark:border-zinc-600 dark:border-t-zinc-50" />
-                Running simulation...
-              </div>
-            )}
-            {simulationStatus === "complete" && (
-              <p className="text-sm font-medium text-green-600 dark:text-green-400">Simulation complete.</p>
-            )}
-            {simulationStatus === "failed" && (
-              <p className="text-sm font-medium text-red-600 dark:text-red-400">Simulation failed.</p>
-            )}
-            {wsError && <p className="text-sm text-red-600 dark:text-red-400">{wsError}</p>}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {displayResults.map((result, index) => (
+                <div
+                  key={result.job_id}
+                  className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
+                >
+                  {result.status === "running" && (
+                    <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900 dark:border-zinc-600 dark:border-t-zinc-50" />
+                      Analyzing compatibility...
+                    </div>
+                  )}
 
-            {scenarios.length > 0 && (
-              <ul className="flex flex-col gap-2">
-                {scenarios.map((s) => (
-                  <li
-                    key={s.scenario}
-                    className="flex items-center justify-between rounded-lg bg-zinc-100 px-3 py-2 text-sm dark:bg-zinc-800"
-                  >
-                    <span className="text-zinc-800 dark:text-zinc-200">Scenario {s.scenario + 1}</span>
-                    <span className="text-xs font-medium text-green-600 dark:text-green-400">Complete</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+                  {result.status === "failed" && (
+                    <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                      This simulation failed to complete.
+                    </p>
+                  )}
 
-            {simulationStatus === "complete" && verdict && (
-              <div className="flex flex-col gap-5 border-t border-zinc-200 pt-5 dark:border-zinc-700">
-                <div className="rounded-lg bg-zinc-100 px-4 py-3 dark:bg-zinc-800">
-                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{verdict.overall_summary}</p>
+                  {result.status === "complete" && result.verdict && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        {allSettled && (
+                          <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-semibold text-white dark:bg-zinc-50 dark:text-zinc-900">
+                            #{index + 1}
+                          </span>
+                        )}
+                        <span className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+                          {Math.round(averageScore(result.verdict) * 10)}%
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        {[
+                          { label: "Lifestyle", score: result.verdict.lifestyle_score },
+                          { label: "Communication", score: result.verdict.communication_score },
+                          { label: "Conflict resolution", score: result.verdict.conflict_score },
+                          { label: "Dealbreakers", score: result.verdict.dealbreaker_score },
+                        ].map((dimension) => (
+                          <div key={dimension.label} className="flex flex-col gap-1">
+                            <div className="flex items-center justify-between text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                              <span>{dimension.label}</span>
+                              <span>{dimension.score}/10</span>
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-700">
+                              <div
+                                className="h-1.5 rounded-full bg-zinc-900 dark:bg-zinc-50"
+                                style={{ width: `${dimension.score * 10}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <p className="text-sm text-zinc-600 dark:text-zinc-400">{result.verdict.overall_summary}</p>
+                    </>
+                  )}
                 </div>
-
-                {[
-                  { label: "Lifestyle", score: verdict.lifestyle_score, explanation: verdict.lifestyle_explanation },
-                  {
-                    label: "Communication",
-                    score: verdict.communication_score,
-                    explanation: verdict.communication_explanation,
-                  },
-                  {
-                    label: "Conflict resolution",
-                    score: verdict.conflict_score,
-                    explanation: verdict.conflict_explanation,
-                  },
-                  {
-                    label: "Dealbreakers",
-                    score: verdict.dealbreaker_score,
-                    explanation: verdict.dealbreaker_explanation,
-                  },
-                ].map((dimension) => (
-                  <div key={dimension.label} className="flex flex-col gap-1.5">
-                    <div className="flex items-center justify-between text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                      <span>{dimension.label}</span>
-                      <span>{dimension.score}/10</span>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-zinc-200 dark:bg-zinc-700">
-                      <div
-                        className="h-1.5 rounded-full bg-zinc-900 dark:bg-zinc-50"
-                        style={{ width: `${dimension.score * 10}%` }}
-                      />
-                    </div>
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400">{dimension.explanation}</p>
-                  </div>
-                ))}
-              </div>
-            )}
+              ))}
+            </div>
           </div>
         ) : (
           <>
